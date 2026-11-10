@@ -1,0 +1,86 @@
+"""
+Database Backup & Management Utility
+Author: Fuad Mohamed Abdi
+Description: A robust Python utility to manage database backups, check file status, 
+             and verify export/import operations programmatically.
+"""
+
+import os
+import subprocess
+from datetime import datetime
+
+class DatabaseManager:
+    def __init__(self, db_name, user, password, host="localhost"):
+        self.db_name = db_name
+        self.user = user
+        self.password = password
+        self.host = host
+
+    def create_backup(self, output_dir="./backups"):
+        """Generates a compressed SQL logical backup of the database."""
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"{output_dir}/{self.db_name}_{timestamp}.sql"
+        
+        # Build mysqldump command
+        cmd = [
+            "mysqldump",
+            f"-u{self.user}",
+            f"-p{self.password}",
+            f"-h{self.host}",
+            "--single-transaction",
+            "--quick",
+            "--routines",
+            "--triggers",
+            self.db_name
+        ]
+        
+        print(f"[*] Starting backup for database: {self.db_name}...")
+        
+        try:
+            with open(backup_filename, "w") as output_file:
+                result = subprocess.run(cmd, stdout=output_file, stderr=subprocess.PIPE, text=True, check=True)
+            print(f"[SUCCESS] Backup successfully created at: {backup_filename}")
+            return backup_filename
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] Backup failed: {e.stderr}")
+            return None
+
+    def restore_backup(self, backup_filepath):
+        """Restores a database from a specified SQL backup file."""
+        if not os.path.exists(backup_filepath):
+            print(f"[ERROR] Backup file not found: {backup_filepath}")
+            return False
+            
+        cmd = [
+            "mysql",
+            f"-u{self.user}",
+            f"-p{self.password}",
+            f"-h{self.host}",
+            self.db_name
+        ]
+        
+        print(f"[*] Restoring database {self.db_name} from {backup_filepath}...")
+        
+        try:
+            with open(backup_filepath, "r") as input_file:
+                result = subprocess.run(cmd, stdin=input_file, stderr=subprocess.PIPE, text=True, check=True)
+            print(f"[SUCCESS] Database '{self.db_name}' restored successfully.")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] Restoration failed: {e.stderr}")
+            return False
+
+if __name__ == "__main__":
+    # Example usage configuration
+    db_manager = DatabaseManager(
+        db_name="sales_db",
+        user="root",
+        password="YourSecurePassword"
+    )
+    
+    # Run backup utility
+    # backup_file = db_manager.create_backup()
+    print("Database management utility script initialized.")
