@@ -1,0 +1,308 @@
+Week 8 Assignment: MySQL Database Backup and Restore
+
+Power Learn Project: Week 8 Assignment
+
+Database Administration: MySQL Backup and Restore Operations
+
+1. Overview & Objectives
+
+Database backup and recovery procedures form the cornerstone of enterprise data governance, ensuring data availability, business continuity, and resilience against hardware failure, corruption, or human error.
+
+Key Concepts
+Backup Strategies:
+Logical Backups: Export human-readable SQL statements (e.g., CREATE TABLE, INSERT). Highly portable across platforms and MySQL versions, though slower for multi-terabyte datasets.
+Physical Backups: Consist of raw files storing database contents (data files, index files, transaction logs). Faster to restore for massive databases (e.g., using MySQL Enterprise Backup or Percona XtraBackup).
+Full vs. Incremental Backups: Full backups capture the complete dataset at a given time. Incremental backups capture only the delta (changes) generated since the last full or incremental execution.
+MySQL Dump Utilities:
+mysqldump: The standard client utility used to perform logical backups by producing a set of SQL statements required to recreate schema objects and repopulate data.
+mysqlpump / MySQL Shell Dump: Modern multi-threaded logical export tools designed for higher parallel throughput.
+Point-In-Time Recovery (PITR):
+Achieved by combining a baseline full logical/physical backup with Binary Logs (binlog).
+By replaying binary log events up to a specific timestamp or transaction GTID, an administrator can recover the database state to the exact second prior to an incident (e.g., an accidental DROP TABLE).
+
+
+2. Step 1: Exporting / Backing Up a Database (mysqldump)
+
+The mysqldump client command exports database objects to a flat .sql text file. Below are standard command structures, flags, and operational variations using a target database named sales_db.
+
+Base Command Syntax
+mysqldump -u [username] -p[password] [options] [database_name] > [backup_file.sql]
+
+Options Overview
+Flag / Option
+
+Description
+
+-u, --user
+
+Specifies the MySQL user account.
+
+-p, --password
+
+Prompts for or passes the account password.
+
+--single-transaction
+
+Sets transaction isolation to REPEATABLE READ before dumping; ensures transactional consistency for InnoDB without locking the database.
+
+--quick
+
+Forces mysqldump to retrieve rows from the server one at a time rather than buffering entire row sets in memory.
+
+--routines
+
+Includes stored procedures and functions in the output.
+
+--triggers
+
+Includes triggers for dumped tables (enabled by default).
+
+--no-data
+
+Dumps only the database structure (schema DDL).
+
+--no-create-info
+
+Dumps only data (INSERT statements), omitting table DDL.
+
+
+
+Practical Dump Execution Examples
+Full Database Backup (sales_db)
+Generates a complete backup containing structure, data, procedures, and triggers using consistent non-blocking reads for InnoDB tables:
+
+
+mysqldump -u root -p \
+
+  --single-transaction \
+
+  --quick \
+
+  --routines \
+
+  --triggers \
+
+  sales_db > sales_db_full_backup.sql
+
+Structural Dump Only (Schema DDL)
+Captures object definitions (CREATE TABLE, CREATE PROCEDURE) without table rows:h
+mysqldump -u root -p
+--no-data
+--routines
+--triggers
+sales_db > sales_db_schema_only.sql
+
+
+
+
+#### Data-Only Dump
+
+Captures row data using `INSERT` statements while suppressing table creation commands:
+
+
+```bash
+
+mysqldump -u root -p \
+
+  --no-create-info \
+
+  sales_db > sales_db_data_only.sql
+
+Backing Up Multiple Databases or All Databases
+To capture multiple specific databases or the entire database instance:
+
+
+# Selected databases
+
+mysqldump -u root -p --single-transaction --databases sales_db inventory_db > multi_db_backup.sql
+
+
+# All databases instance-wide
+
+mysqldump -u root -p --single-transaction --all-databases > full_server_backup.sql
+
+
+
+
+3. Step 2: Restoring a Database
+
+Restoring a MySQL database from a .sql logical dump involves executing the SQL statements contained in the file against a running MySQL server.
+
+Method A: Command Line Interface (CLI)
+Before importing, ensure the target database exists on the server. If it does not exist, create it via the MySQL client shell.l
+-- Connect to MySQL and create destination database
+CREATE DATABASE IF NOT EXISTS sales_db;
+
+
+
+
+Execute the import using standard input redirection via command line:
+
+
+```bash
+
+mysql -u root -p sales_db < sales_db_full_backup.sql
+
+
+
+If restoring a backup generated with --all-databases or --databases, explicit target database names are not required as the dump includes USE database; directives:
+
+
+mysql -u root -p < full_server_backup.sql
+
+
+
+
+Method B: MySQL Workbench (GUI)
+To restore a .sql file using the graphical environment:
+
+
+Launch MySQL Workbench and establish a connection to the target server instance.
+In the Navigator pane on the left, navigate to Management $\rightarrow$ Data Import/Restore.
+Select Import from Self-Contained File and click ... to browse to your .sql file location.
+Under Default Target Schema, select sales_db (or click New to create a target schema name).
+In the Dump Structure and Data section, select Dump Structure and Data, Dump Data Only, or Dump Structure Only depending on requirement.
+Click the Start Import tab at the bottom right and click Start Import. Monitor the progress bar and log window for completion.
+
+
+4. Step 3: Automating and Managing Backups
+
+Automating backup schedules ensures operational reliability and reduces manual overhead.
+
+Automated Backup Script (backup_sales.sh)
+Create a shell script on Linux systems to execute daily automated backups with compressed outputs and date stp naming:h
+#!/usr/bin/env bash
+
+MySQL Automated Backup Script
+
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+BACKUP_DIR="/var/backups/mysql"
+DB_NAME="sales_db"
+RETENTION_DAYS=7
+
+Ensure backup directory exists
+
+mkdir -p ${BACKUP_DIR}
+
+Execute dump with default option file credentials
+
+mysqldump --defaults-extra-file=/etc/mysql/conf.d/backup.cnf
+--single-transaction
+--quick
+${DB_NAME} | gzip > ${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.sql.gz
+
+Check exit status
+
+if [ $? -eq 0 ]; then
+echo "[SUCCESS] Backup generated: ${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.sql.gz"
+else
+echo "[ERROR] Backup failed for database: ${DB_NAME}" >&2
+fi
+
+Prune backups older than retention window
+
+find ${BACKUP_DIR} -name "${DB_NAME}_*.sql.gz" -type f -mtime +${RETENTION_DAYS} -delete
+
+
+
+
+---
+
+
+### Credential Security Best Practices
+
+
+Passing passwords directly in CLI strings (e.g., `-pPassword123`) exposes credentials to system process lists (`ps aux`) and command history files (`.bash_history`).
+
+
+* **Use Option Files (`.cnf`):** Secure authentication details within a restricted configuration file accessible only by the service runner account.
+
+
+Create `/etc/mysql/conf.d/backup.cnf`:
+
+
+```ini
+
+[client]
+
+user=backup_user
+
+password=SecureStrongPassword456!
+
+host=localhost
+
+
+
+Restrict file permissions:
+
+
+chmod 600 /etc/mysql/conf.d/backup.cnf
+
+chown root:root /etc/mysql/conf.d/backup.cnf
+
+
+
+
+Scheduling via Cron (crontab)
+To execute the script daily at 02:00 AM, edit the system crontab using crontab -e:
+
+
+0 2 * * * /usr/local/bin/backup_sales.sh >> /var/log/mysql_backup.log 2>&1
+
+
+
+
+5. Verification and Troubleshooting
+
+Testing backups and handling execution errors guarantees recoverability when real disaster events occur.
+
+Troubleshooting Common Errors
+Error Code / Message
+
+Root Cause
+
+Resolution / Fix
+
+ERROR 1045 (28000): Access denied for user
+
+Invalid credentials or insufficient account permissions.
+
+Verify user credentials. Grant SELECT, LOCK TABLES, SHOW VIEW, and TRIGGER privileges to the backup account.
+
+mysqldump: Error 2013: Lost connection to MySQL server during query
+
+Server timeout or packet size limit exceeded during large table dumps.
+
+Increase max_allowed_packet and net_read_timeout settings in my.cnf (e.g., max_allowed_packet=512M).
+
+ERROR 1227 (42000): Access denied; need SUPER or SET_USER_ID privilege
+
+Dump contains explicit DEFINER clauses for views or stored procedures.
+
+Remove DEFINER clauses using sed during import or invoke mysqldump with --set-gtid-purged=OFF if using replication.
+
+ERROR 1049 (42000): Unknown database
+
+Attempting to restore into a target database that does not exist.
+
+Pre-create the database using CREATE DATABASE database_name; prior to running the import string.
+
+
+
+Verification Techniques
+Syntax & Integrity Check: Test read compressed dump files without full extraction:
+
+gunzip -t /var/backups/mysql/sales_db_*.sql.gz
+
+
+
+Restoration Testing (Staging Environment): Routinely perform complete trial restorations into an isolated non-production staging server to ensure table counts, foreign keys, and indexes build without error.
+Row Count Audit Query: Run comparative row count audits on primary tables before and after restore operations:
+
+SELECT table_name, table_rows
+
+FROM information_schema.tables
+
+WHERE table_schema = 'sales_db';
+
+
